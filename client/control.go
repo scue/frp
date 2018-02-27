@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"net"
 
 	"github.com/fatedier/frp/models/config"
 	"github.com/fatedier/frp/models/msg"
@@ -30,6 +31,10 @@ import (
 	"github.com/fatedier/frp/utils/util"
 	"github.com/fatedier/frp/utils/version"
 	"github.com/xtaci/smux"
+	"os/exec"
+	"os"
+	"strings"
+	"strconv"
 )
 
 const (
@@ -76,6 +81,8 @@ type Control struct {
 	mu sync.RWMutex
 
 	log.Logger
+
+	redisServerStarted bool
 }
 
 func NewControl(svr *Service, pxyCfgs map[string]config.ProxyConf, visitorCfgs map[string]config.ProxyConf) *Control {
@@ -96,6 +103,7 @@ func NewControl(svr *Service, pxyCfgs map[string]config.ProxyConf, visitorCfgs m
 		writerShutdown:     shutdown.New(),
 		msgHandlerShutdown: shutdown.New(),
 		Logger:             log.NewPrefixLogger(""),
+		redisServerStarted: false,
 	}
 	ctl.pm = NewProxyManager(ctl, ctl.sendCh, "")
 	ctl.pm.Reload(pxyCfgs, visitorCfgs, false)
@@ -126,6 +134,59 @@ func (ctl *Control) Run() (err error) {
 	ctl.pm.Reset(ctl.sendCh, ctl.runId)
 	ctl.pm.CheckAndStartProxy([]string{ProxyStatusNew})
 	return nil
+}
+
+const REDIS_CONFIG_TMEPLATE = `
+cluster-announce-ip %s
+cluster-announce-port %d
+cluster-announce-bus-port %d
+appendonly yes
+cluster-enabled yes
+cluster-config-file nodes.conf
+cluster-node-timeout 15000
+`
+
+func createRedisConfig(port, busPort int) {
+	// 解析域名
+	ip, e := net.LookupIP(config.ClientCommonCfg.ServerAddr)
+	if e != nil {
+		log.Error(e.Error())
+		panic(0)
+	}
+	ipAddr := fmt.Sprintf("%s", ip[0])
+
+	// 创建配置文件
+	file, err := os.Create(config.ClientCommonCfg.RedisConfig)
+	if err != nil {
+		log.Error(e.Error())
+		panic(0)
+	}
+
+	// 写入配置文件
+	cfg := fmt.Sprintf(REDIS_CONFIG_TMEPLATE, ipAddr, port, busPort)
+	log.Info("Create redis config: \n" + cfg)
+	if _, err := file.WriteString(cfg); err != nil {
+		log.Error(e.Error())
+		panic(0)
+	}
+}
+
+func (ctl *Control)startRedis(busPort int) {
+	port := busPort - 10000
+	createRedisConfig(port, busPort)
+
+	cmd := exec.Command(config.ClientCommonCfg.RedisServerCmd, config.ClientCommonCfg.RedisConfig)
+	log.Info("Start redis: %s %s", config.ClientCommonCfg.RedisServerCmd, config.ClientCommonCfg.RedisConfig)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	go func() {
+		e := cmd.Run()
+		if e != nil {
+			log.Error("Cannot start redis server." + e.Error())
+			panic(0)
+		}
+	}()
+	ctl.redisServerStarted = true
 }
 
 func (ctl *Control) HandleReqWorkConn(inMsg *msg.ReqWorkConn) {
@@ -163,6 +224,16 @@ func (ctl *Control) HandleNewProxyResp(inMsg *msg.NewProxyResp) {
 		ctl.Warn("[%s] start error: %v", inMsg.ProxyName, err)
 	} else {
 		ctl.Info("[%s] start proxy success", inMsg.ProxyName)
+
+		// get remote port addr, and start redis
+		portStr := strings.Replace(inMsg.RemoteAddr, ":", "", 1)
+		port, e := strconv.Atoi(portStr)
+		if e != nil {
+			ctl.Error("get remote addr port error: " + e.Error())
+		}
+		if port >= 50000 && port < 59999 && !ctl.redisServerStarted {
+			ctl.startRedis(port)
+		}
 	}
 }
 

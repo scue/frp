@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"strings"
 )
 
 const (
@@ -33,6 +34,7 @@ type PortManager struct {
 	reservedPorts map[string]*PortCtx
 	usedPorts     map[int]*PortCtx
 	freePorts     map[int]struct{}
+	ocFreePorts   map[int]struct{}
 
 	bindAddr string
 	netType  string
@@ -44,8 +46,14 @@ func NewPortManager(netType string, bindAddr string, allowPorts map[int]struct{}
 		reservedPorts: make(map[string]*PortCtx),
 		usedPorts:     make(map[int]*PortCtx),
 		freePorts:     make(map[int]struct{}),
+		ocFreePorts:   make(map[int]struct{}),
 		bindAddr:      bindAddr,
 		netType:       netType,
+	}
+
+	// 初始化玩客云的端口可用数据
+	for i := 40000; i < 49999; i++ {
+		pm.ocFreePorts[i] = struct{}{};
 	}
 	if len(allowPorts) > 0 {
 		for port, _ := range allowPorts {
@@ -58,6 +66,19 @@ func NewPortManager(netType string, bindAddr string, allowPorts map[int]struct{}
 	}
 	go pm.cleanReservedPortsWorker()
 	return pm
+}
+
+func (pm *PortManager) specifyPort(ctx *PortCtx, name string, port int, isOcRedisPort bool) (ok bool) {
+	if pm.isPortAvailable(port) {
+		pm.usedPorts[port] = ctx
+		pm.reservedPorts[name] = ctx
+		delete(pm.freePorts, port)
+		if isOcRedisPort {
+			delete(pm.ocFreePorts, port)
+		}
+		return true;
+	}
+	return false
 }
 
 func (pm *PortManager) Acquire(name string, port int) (realPort int, err error) {
@@ -78,7 +99,7 @@ func (pm *PortManager) Acquire(name string, port int) (realPort int, err error) 
 	}()
 
 	// check reserved ports first
-	if port == 0 {
+	if port == 0 || port == 49999 {
 		if ctx, ok := pm.reservedPorts[name]; ok {
 			if pm.isPortAvailable(ctx.Port) {
 				realPort = ctx.Port
@@ -110,6 +131,39 @@ func (pm *PortManager) Acquire(name string, port int) (realPort int, err error) 
 		if realPort == 0 {
 			err = ErrNoAvailablePort
 		}
+	} else if port == 49999 {
+		// 获取一个随机的Redis端口
+		count := 0
+		maxCount := 5
+		for k, _ := range pm.ocFreePorts {
+			count++
+			if count > maxCount {
+				err = ErrNoAvailablePort
+				break
+			}
+			if pm.isPortAvailable(k) {
+				realPort = k;
+				pm.usedPorts[realPort] = portCtx
+				pm.reservedPorts[name] = portCtx
+				delete(pm.freePorts, realPort)
+				delete(pm.ocFreePorts, realPort)
+				break
+			}
+		}
+	} else if port == 59999 {
+		search := strings.Replace(name, "-cluster", "", 1)
+		if ctx, ok := pm.reservedPorts[search]; ok {
+			// Redis集群通信端口是redis端口+10000
+			p := ctx.Port + 10000;
+			if pm.isPortAvailable(p) {
+				realPort = p
+				pm.usedPorts[realPort] = portCtx
+				pm.reservedPorts[name] = portCtx
+				delete(pm.freePorts, realPort)
+				return
+			}
+		}
+		err = ErrNoAvailablePort
 	} else {
 		// specified port
 		if _, ok = pm.freePorts[port]; ok {

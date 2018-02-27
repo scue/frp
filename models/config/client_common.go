@@ -49,6 +49,8 @@ type ClientCommonConf struct {
 	Protocol          string
 	HeartBeatInterval int64
 	HeartBeatTimeout  int64
+	RedisServerCmd    string
+	RedisConfig       string
 }
 
 func GetDeaultClientCommonConf() *ClientCommonConf {
@@ -75,6 +77,8 @@ func GetDeaultClientCommonConf() *ClientCommonConf {
 		Protocol:          "tcp",
 		HeartBeatInterval: 30,
 		HeartBeatTimeout:  90,
+		RedisServerCmd:    "/usr/local/onething/redis/bin/redis-server",
+		RedisConfig:       "/etc/redis.conf",
 	}
 }
 
@@ -85,6 +89,16 @@ func LoadClientCommonConf(conf ini.File) (cfg *ClientCommonConf, err error) {
 		v      int64
 	)
 	cfg = GetDeaultClientCommonConf()
+
+	tmpStr, ok = conf.Get("common", "redis_server")
+	if ok {
+		cfg.RedisServerCmd = tmpStr
+	}
+
+	tmpStr, ok = conf.Get("common", "redis_config")
+	if ok {
+		cfg.RedisConfig = tmpStr
+	}
 
 	tmpStr, ok = conf.Get("common", "server_addr")
 	if ok {
