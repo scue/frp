@@ -17,10 +17,10 @@ package client
 import (
 	"fmt"
 	"io"
+	"net"
 	"runtime"
 	"sync"
 	"time"
-	"net"
 
 	"github.com/fatedier/frp/models/config"
 	"github.com/fatedier/frp/models/msg"
@@ -31,10 +31,10 @@ import (
 	"github.com/fatedier/frp/utils/util"
 	"github.com/fatedier/frp/utils/version"
 	"github.com/xtaci/smux"
-	"os/exec"
 	"os"
-	"strings"
+	"os/exec"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -171,7 +171,7 @@ func createRedisConfig(port, busPort int) {
 	}
 }
 
-func (ctl *Control)startRedis(busPort int) {
+func (ctl *Control) startRedis(busPort int) {
 	port := busPort - 10000
 	createRedisConfig(port, busPort)
 

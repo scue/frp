@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 )
 
 const (
@@ -53,7 +53,7 @@ func NewPortManager(netType string, bindAddr string, allowPorts map[int]struct{}
 
 	// 初始化玩客云的端口可用数据
 	for i := 40000; i < 49999; i++ {
-		pm.ocFreePorts[i] = struct{}{};
+		pm.ocFreePorts[i] = struct{}{}
 	}
 	if len(allowPorts) > 0 {
 		for port, _ := range allowPorts {
@@ -76,7 +76,7 @@ func (pm *PortManager) specifyPort(ctx *PortCtx, name string, port int, isOcRedi
 		if isOcRedisPort {
 			delete(pm.ocFreePorts, port)
 		}
-		return true;
+		return true
 	}
 	return false
 }
@@ -142,7 +142,7 @@ func (pm *PortManager) Acquire(name string, port int) (realPort int, err error) 
 				break
 			}
 			if pm.isPortAvailable(k) {
-				realPort = k;
+				realPort = k
 				pm.usedPorts[realPort] = portCtx
 				pm.reservedPorts[name] = portCtx
 				delete(pm.freePorts, realPort)
@@ -154,7 +154,7 @@ func (pm *PortManager) Acquire(name string, port int) (realPort int, err error) 
 		search := strings.Replace(name, "-cluster", "", 1)
 		if ctx, ok := pm.reservedPorts[search]; ok {
 			// Redis集群通信端口是redis端口+10000
-			p := ctx.Port + 10000;
+			p := ctx.Port + 10000
 			if pm.isPortAvailable(p) {
 				realPort = p
 				pm.usedPorts[realPort] = portCtx
